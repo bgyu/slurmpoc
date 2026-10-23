@@ -1,0 +1,60 @@
+# Production Slurm implementation plan
+
+This plan implements the approved design in independently testable layers.
+The repository is not currently a valid Git worktree, so the usual commit per
+layer cannot be performed here; each layer is nevertheless kept reviewable.
+
+## Layer 1: build and runtime contract
+
+- Harden the Containerfile with version/digest inputs, required plugin checks,
+  fixed service users, and a build manifest in `/var/packages`.
+- Replace the multi-daemon database role with separate MariaDB and `slurmdbd`
+  roles in the production contract.  The local profile may still use one
+  image, but every daemon remains a distinct process/container.
+- Add startup permission validation and runtime-secret staging.
+
+Verification: build image; inspect RPM manifest; run daemon/plugin checks;
+scan image configuration and history for generated secrets.
+
+## Layer 2: Slurm configuration and elastic nodes
+
+- Add production and simulation configuration templates.
+- Enable configless operation and a bounded `FUTURE` node pool.
+- Add cgroup v2 production settings and an explicit WSL simulation override.
+- Implement lock-protected, idempotent add/drain/remove node commands.
+
+Verification: start five nodes; add a node; schedule work on it; drain/remove
+it; reject unsafe active removal.
+
+## Layer 3: protected REST plane
+
+- Add a dedicated `slurmrestd` role and identity.
+- Pin REST API `v0.0.45` and limit loaded plugins/connections.
+- Add a TLS/authentication gateway contract and a self-contained development
+  issuer.  Production requires external OIDC/JWKS.
+- Add REST readiness and negative security tests.
+
+Verification: submit a simple job through the gateway; prove direct client
+access and forged/expired tokens fail.
+
+## Layer 4: durable workflow service
+
+- Implement workflow records and idempotency constraints.
+- Submit a master through Slurm REST.
+- Issue and atomically consume a short-lived callback capability.
+- Submit a throttled worker array and an `afterany` finalizer.
+- Implement reconciliation and explicit cancellation.
+
+Verification: run the demo workflow; retry all API operations; restart the
+broker around an ambiguous submission; verify one master and one array.
+
+## Layer 5: deployment and operations
+
+- Harden Compose as an integration profile.
+- Add Quadlet/systemd examples and an AWS deployment contract.
+- Document secret-manager, PKI, IAM, networking, storage, backup, restore,
+  upgrade, node lifecycle, and incident procedures.
+- Add a complete acceptance script and operator commands.
+
+Verification: lint configuration, render Compose/Quadlet definitions, run the
+acceptance suite, and document limitations not testable inside WSL.
