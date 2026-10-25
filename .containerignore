@@ -1,0 +1,8 @@
+.git/
+.runtime/
+.agents/
+.aws/
+.codex/
+**/__pycache__/
+**/*.py[cod]
+workflow/tests/

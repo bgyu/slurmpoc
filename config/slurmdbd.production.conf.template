@@ -1,0 +1,34 @@
+# PRODUCTION PROFILE. This file becomes /run/slurm/config/slurmdbd.conf only
+# after its database password is read from SLURMDBD_STORAGE_PASSWORD_FILE.
+# Production bootstrap never creates accounts, users, QOS, or associations.
+AuthType=auth/munge
+AuthAltTypes=auth/jwt
+AuthAltParameters=jwks=/run/slurm/config/slurm-jwks.json,userclaimfield=preferred_username,disable_token_creation
+
+TLSType=tls/s2n
+TLSParameters=ca_cert_file=/run/slurm/config/ca_cert.pem,dbd_cert_file=/run/slurm/config/dbd_cert.pem,dbd_cert_key_file=/run/slurm/config/dbd_cert_key.pem
+
+DbdHost=slurmdbd-primary
+DbdBackupHost=slurmdbd-backup
+DbdPort=6819
+SlurmUser=slurm
+DebugLevel=info
+LogFile=/dev/stderr
+PidFile=/run/slurm/pids/slurmdbd.pid
+PrivateData=accounts,events,jobs,reservations,usage,users
+
+StorageType=accounting_storage/mysql
+StorageHost=@STORAGE_HOST@
+StoragePort=@STORAGE_PORT@
+StorageLoc=@STORAGE_DATABASE@
+StorageUser=@STORAGE_USER@
+
+# The entrypoint replaces this whole line with either StoragePass (read from a
+# file without exposing it in argv/environment) or StoragePassScript.  The
+# latter is preferred for short-lived AWS RDS IAM database authentication.
+@STORAGE_CREDENTIAL@
+
+# Production startup replaces this with StorageParameters=SSL_CA=... and
+# refuses to start without a CA file.  The database link is independent of
+# Slurm's tls/s2n control-plane certificates and must be protected separately.
+@STORAGE_TLS_PARAMETERS@

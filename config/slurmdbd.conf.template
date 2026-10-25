@@ -1,0 +1,18 @@
+# ROOTLESS INTEGRATION PROFILE ONLY. The password placeholder is rendered from
+# SLURMDBD_STORAGE_PASSWORD_FILE into a private tmpfs-backed runtime copy. A
+# secret value must never be put directly in this template or an environment.
+AuthType=auth/munge
+DbdHost=slurmdbd
+DbdPort=6819
+SlurmUser=slurm
+DebugLevel=info
+LogFile=/dev/stderr
+PidFile=/run/slurm/pids/slurmdbd.pid
+
+StorageType=accounting_storage/mysql
+StorageHost=@STORAGE_HOST@
+StoragePort=@STORAGE_PORT@
+StorageLoc=@STORAGE_DATABASE@
+StorageUser=@STORAGE_USER@
+@STORAGE_CREDENTIAL@
+@STORAGE_TLS_PARAMETERS@
