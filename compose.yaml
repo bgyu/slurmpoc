@@ -1,0 +1,268 @@
+name: slurm-sim
+
+# This Compose file is an integration profile, not the AWS production
+# topology. It deliberately uses the same immutable image and the same
+# file-based secret/config contracts as production, while substituting one
+# host, one controller and one MariaDB instance for external HA services.
+
+x-runtime-security: &runtime-security
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  # PID 1 starts as container root only to validate/stage read-only secrets
+  # and then launches each daemon as its documented service identity.
+  cap_drop:
+    - ALL
+  cap_add:
+    - CHOWN
+    - DAC_OVERRIDE
+    - FOWNER
+    - KILL
+    - SETGID
+    - SETUID
+  pids_limit: 512
+  tmpfs:
+    - /run:rw,nodev,nosuid,noexec,size=64m,mode=0755
+    - /tmp:rw,nodev,nosuid,noexec,size=128m,mode=1777
+    - /var/log:rw,nodev,nosuid,noexec,size=64m,mode=0755
+    - /var/lib/munge:rw,nodev,nosuid,noexec,size=16m,mode=0700
+  restart: unless-stopped
+  stop_grace_period: 60s
+
+x-slurm-daemon: &slurm-daemon
+  <<: *runtime-security
+  image: localhost/slurm-sim:${SLURM_IMAGE_TAG:-latest}
+  environment:
+    CLUSTER_DEPLOYMENT_PROFILE: simulation
+    START_EMBEDDED_MUNGE: "1"
+    MUNGE_KEY_FILE: /run/secrets/munge.key
+  volumes:
+    - ./.runtime/secrets/munge.key:/run/secrets/munge.key:ro,z
+  networks:
+    - control
+
+x-compute: &compute
+  <<: *slurm-daemon
+  environment:
+    CONTAINER_ROLE: compute
+    CLUSTER_DEPLOYMENT_PROFILE: simulation
+    START_EMBEDDED_MUNGE: "1"
+    MUNGE_KEY_FILE: /run/secrets/munge.key
+    SLURM_CONF_SERVER: controller:6817
+    SLURMD_FEATURE: local-podman
+  depends_on:
+    - controller
+  # Slurmd remains root inside the compute container. That is required to
+  # launch a job as UID 64032 (workflow) instead of running jobs as root.
+  cap_add:
+    - CHOWN
+    - DAC_OVERRIDE
+    - FOWNER
+    - KILL
+    - SETGID
+    - SETUID
+    - SYS_NICE
+  cpus: 2.0
+  mem_limit: 1536m
+
+services:
+  database:
+    <<: *runtime-security
+    image: localhost/slurm-sim:${SLURM_IMAGE_TAG:-latest}
+    hostname: database
+    environment:
+      CONTAINER_ROLE: database
+      CLUSTER_DEPLOYMENT_PROFILE: simulation
+      MARIADB_SLURM_PASSWORD_FILE: /run/secrets/mariadb-slurm.password
+    volumes:
+      - ./.runtime/secrets/mariadb-slurm.password:/run/secrets/mariadb-slurm.password:ro,z
+      - mariadb-data:/var/lib/mysql
+    networks:
+      - accounting
+
+  slurmdbd:
+    <<: *slurm-daemon
+    hostname: slurmdbd
+    environment:
+      CONTAINER_ROLE: slurmdbd
+      CLUSTER_DEPLOYMENT_PROFILE: simulation
+      START_EMBEDDED_MUNGE: "1"
+      MUNGE_KEY_FILE: /run/secrets/munge.key
+      SLURMDBD_STORAGE_PASSWORD_FILE: /run/secrets/mariadb-slurm.password
+      SLURM_JWT_KEY_FILE: /run/secrets/slurm-jwt-hs256.key
+    depends_on:
+      - database
+    volumes:
+      - ./.runtime/secrets/munge.key:/run/secrets/munge.key:ro,z
+      - ./.runtime/secrets/mariadb-slurm.password:/run/secrets/mariadb-slurm.password:ro,z
+      - ./.runtime/secrets/slurm-jwt-hs256.key:/run/secrets/slurm-jwt-hs256.key:ro,z
+    networks:
+      - accounting
+      - control
+
+  controller:
+    <<: *slurm-daemon
+    # This singleton gets a stable local name so operators can use either
+    # `podman compose exec controller ...` or `podman exec controller ...`.
+    # Production does not use this Compose file and names HA instances through
+    # their Quadlet units instead.
+    container_name: controller
+    hostname: controller
+    environment:
+      CONTAINER_ROLE: controller
+      CLUSTER_DEPLOYMENT_PROFILE: simulation
+      START_EMBEDDED_MUNGE: "1"
+      MUNGE_KEY_FILE: /run/secrets/munge.key
+      SLURM_JWT_KEY_FILE: /run/secrets/slurm-jwt-hs256.key
+    depends_on:
+      - slurmdbd
+    volumes:
+      - ./.runtime/secrets/munge.key:/run/secrets/munge.key:ro,z
+      - ./.runtime/secrets/slurm-jwt-hs256.key:/run/secrets/slurm-jwt-hs256.key:ro,z
+      - controller-state:/var/spool/slurmctld
+      - shared-data:/shared
+
+  # The development issuer has no signing key. It uses authenticated Slurm
+  # RPC as SlurmUser to request a <=10 minute token for only the non-admin
+  # workflow user, then atomically rotates that token in a runtime volume.
+  # Production disables this role and uses OIDC token exchange plus JWKS.
+  token-issuer:
+    <<: *slurm-daemon
+    hostname: token-issuer
+    environment:
+      CONTAINER_ROLE: token-issuer
+      CLUSTER_DEPLOYMENT_PROFILE: simulation
+      START_EMBEDDED_MUNGE: "1"
+      MUNGE_KEY_FILE: /run/secrets/munge.key
+      ALLOW_DEVELOPMENT_TOKEN_ISSUER: "1"
+      SLURM_TOKEN_FILE: /run/slurm-token/workflow.jwt
+      SLURM_TOKEN_USER: workflow
+      SLURM_TOKEN_LIFESPAN: "600"
+      SLURM_TOKEN_REFRESH_SECONDS: "300"
+    depends_on:
+      - controller
+    volumes:
+      - ./.runtime/secrets/munge.key:/run/secrets/munge.key:ro,z
+      - slurm-token:/run/slurm-token
+
+  restd:
+    <<: *slurm-daemon
+    hostname: restd
+    environment:
+      CONTAINER_ROLE: restd
+      CLUSTER_DEPLOYMENT_PROFILE: simulation
+      START_EMBEDDED_MUNGE: "1"
+      MUNGE_KEY_FILE: /run/secrets/munge.key
+      REST_AUTH_MODE: jwt
+      SLURMRESTD_LISTEN: 0.0.0.0:6820
+      SLURMRESTD_MAX_CONNECTIONS: "32"
+    depends_on:
+      - controller
+    # No host port is published. The only application caller is the broker on
+    # the private control network.
+    expose:
+      - "6820"
+
+  broker:
+    <<: *runtime-security
+    image: localhost/slurm-sim:${SLURM_IMAGE_TAG:-latest}
+    hostname: broker
+    environment:
+      CONTAINER_ROLE: broker
+      CLUSTER_DEPLOYMENT_PROFILE: simulation
+      BROKER_PROFILE: local
+      BROKER_AUTH_MODE: local-token
+      BROKER_API_TOKEN_FILE: /run/secrets/broker-api.token
+      WORKFLOW_DB: /var/lib/workflow/workflow.sqlite3
+      WORKFLOW_LISTEN_HOST: 0.0.0.0
+      WORKFLOW_LISTEN_PORT: "8088"
+      WORKFLOW_PUBLIC_BASE_URL: http://broker:8088
+      WORKFLOW_ALLOWED_FILE_ROOT: /shared
+      WORKFLOW_CONTROL_DIR: /shared/.workflow-control
+      WORKFLOW_CAPABILITY_DIR: /shared/.workflow-control/capabilities
+      WORKFLOW_CAPABILITY_JOB_DIR: /shared/.workflow-control/capabilities
+      WORKFLOW_MASTER_SCRIPT: /opt/slurm-workflow/examples/master.sbatch
+      WORKFLOW_WORKER_SCRIPT: /opt/slurm-workflow/examples/worker.sbatch
+      WORKFLOW_FINALIZER_SCRIPT: /opt/slurm-workflow/examples/finalizer.sbatch
+      WORKFLOW_MAX_CHUNKS: "10000"
+      WORKFLOW_MAX_PARALLEL: "100"
+      SLURM_REST_URL: http://restd:6820
+      SLURM_REST_ALLOW_INSECURE_HTTP: "1"
+      SLURM_REST_TOKEN_FILE: /run/slurm-token/workflow.jwt
+      SLURM_REST_TOKEN_HEADER: X-SLURM-USER-TOKEN
+      SLURM_REST_TOKEN_PREFIX: ""
+      SLURM_REST_USER_HEADER: X-SLURM-USER-NAME
+    depends_on:
+      - restd
+      - token-issuer
+    volumes:
+      - ./.runtime/secrets/broker-api.token:/run/secrets/broker-api.token:ro,z
+      - slurm-token:/run/slurm-token:ro
+      - workflow-state:/var/lib/workflow
+      - shared-data:/shared
+    networks:
+      - control
+      - edge
+    ports:
+      # Loopback prevents the development bearer token from being exposed to
+      # the LAN. Production publishes only a TLS/OIDC gateway.
+      - "127.0.0.1:${WORKFLOW_PORT:-8088}:8088"
+
+  compute001:
+    <<: *compute
+    hostname: compute-host-001
+    volumes:
+      - ./.runtime/secrets/munge.key:/run/secrets/munge.key:ro,z
+      - shared-data:/shared
+      - compute001-spool:/var/spool/slurmd
+
+  compute002:
+    <<: *compute
+    hostname: compute-host-002
+    volumes:
+      - ./.runtime/secrets/munge.key:/run/secrets/munge.key:ro,z
+      - shared-data:/shared
+      - compute002-spool:/var/spool/slurmd
+
+  compute003:
+    <<: *compute
+    hostname: compute-host-003
+    volumes:
+      - ./.runtime/secrets/munge.key:/run/secrets/munge.key:ro,z
+      - shared-data:/shared
+      - compute003-spool:/var/spool/slurmd
+
+  compute004:
+    <<: *compute
+    hostname: compute-host-004
+    volumes:
+      - ./.runtime/secrets/munge.key:/run/secrets/munge.key:ro,z
+      - shared-data:/shared
+      - compute004-spool:/var/spool/slurmd
+
+  compute005:
+    <<: *compute
+    hostname: compute-host-005
+    volumes:
+      - ./.runtime/secrets/munge.key:/run/secrets/munge.key:ro,z
+      - shared-data:/shared
+      - compute005-spool:/var/spool/slurmd
+
+networks:
+  accounting:
+    internal: true
+  control:
+    internal: true
+  edge: {}
+
+volumes:
+  mariadb-data:
+  controller-state:
+  workflow-state:
+  shared-data:
+  slurm-token:
+  compute001-spool:
+  compute002-spool:
+  compute003-spool:
+  compute004-spool:
+  compute005-spool:

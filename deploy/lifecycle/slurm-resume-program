@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+# Slurm owns SLURM_RESUME_FILE only briefly.  Copy it before configuration
+# parsing, DNS, or TLS work so a slow dependency cannot make the job-to-node
+# mapping disappear underneath this hook.
+[[ $# -eq 1 ]] || { printf 'usage: slurm-resume-program NODE_HOSTLIST\n' >&2; exit 64; }
+[[ -n ${SLURM_RESUME_FILE:-} && -f $SLURM_RESUME_FILE && \
+   ! -L $SLURM_RESUME_FILE && -r $SLURM_RESUME_FILE ]] || {
+    printf '[slurm-lifecycle] ERROR: SLURM_RESUME_FILE is unavailable\n' >&2
+    exit 1
+}
+# Keep the pre-configuration copy bounded.  lifecycle-common applies the
+# tighter configured limit after loading policy, but this absolute ceiling
+# prevents a compromised controller-side file descriptor from filling /tmp.
+resume_size=$(stat --format='%s' "$SLURM_RESUME_FILE") || {
+    printf '[slurm-lifecycle] ERROR: cannot stat SLURM_RESUME_FILE\n' >&2
+    exit 1
+}
+((resume_size <= 10485760)) || {
+    printf '[slurm-lifecycle] ERROR: SLURM_RESUME_FILE exceeds 10 MiB\n' >&2
+    exit 1
+}
+resume_copy_dir=$(mktemp -d "${TMPDIR:-/tmp}/slurm-resume.XXXXXXXX")
+trap 'rm -rf -- "$resume_copy_dir"' EXIT
+install -m 0600 -- "$SLURM_RESUME_FILE" "$resume_copy_dir/resume.json"
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=lifecycle-common.sh
+source "$script_dir/lifecycle-common.sh"
+lifecycle_init
+lifecycle_request resume "$1" "$resume_copy_dir/resume.json"

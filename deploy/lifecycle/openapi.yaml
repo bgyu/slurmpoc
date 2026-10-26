@@ -1,0 +1,147 @@
+openapi: 3.1.0
+info:
+  title: Slurm narrow node lifecycle API
+  version: 1.0.0
+  description: >-
+    Contract between Slurm power hooks and the separately authorized cloud
+    reconciler. The service must authenticate the client certificate, bind it
+    to exactly one cluster, and persist an idempotent intent before replying.
+servers:
+  - url: https://lifecycle.internal.example
+paths:
+  /v1/clusters/{cluster_id}/nodes:resume:
+    post:
+      operationId: resumeNodes
+      summary: Persist an idempotent request to provision approved node identities.
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LifecycleRequest'
+      responses:
+        '202':
+          description: New durable intent accepted for asynchronous reconciliation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleResponse' }
+        '200':
+          description: The identical idempotent intent already exists.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleResponse' }
+        '409':
+          description: The idempotency key exists with a different request hash.
+        '401':
+          description: The client certificate is missing or invalid.
+        '403':
+          description: The authenticated certificate is not authorized for this cluster.
+        '413':
+          description: The bounded resume context or request body is too large.
+        '422':
+          description: Node/profile policy or the resume context is invalid.
+        '429':
+          description: Cluster lifecycle rate limit exceeded; includes Retry-After.
+        '503':
+          description: The durable intent store is unavailable; nothing was accepted.
+  /v1/clusters/{cluster_id}/nodes:suspend:
+    post:
+      operationId: suspendNodes
+      summary: Persist an idempotent request to retire already-drained nodes.
+      parameters:
+        - $ref: '#/components/parameters/ClusterId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LifecycleRequest'
+      responses:
+        '202':
+          description: New durable intent accepted for asynchronous reconciliation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleResponse' }
+        '200':
+          description: The identical idempotent intent already exists.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleResponse' }
+        '409':
+          description: The idempotency key exists with a different request hash.
+        '401':
+          description: The client certificate is missing or invalid.
+        '403':
+          description: The authenticated certificate is not authorized for this cluster.
+        '422':
+          description: A node is not eligible for suspension.
+        '429':
+          description: Cluster lifecycle rate limit exceeded; includes Retry-After.
+        '503':
+          description: The durable intent store is unavailable; nothing was accepted.
+components:
+  securitySchemes:
+    mutualTLS:
+      type: mutualTLS
+      description: >-
+        A private-CA client certificate whose SAN maps to one Slurm cluster and
+        only the resume/suspend operations. Certificates are short lived.
+  parameters:
+    ClusterId:
+      name: cluster_id
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$' }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: >-
+        Per-hook-invocation SHA-256 key reused for all HTTP retries. The service
+        stores it with the canonical request hash and returns the original
+        operation for an identical retry. It must additionally reconcile one
+        desired state per cluster/node because distinct hook invocations use
+        distinct keys.
+      schema: { type: string, pattern: '^slurm-[a-f0-9]{64}$' }
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: true
+      description: Per-attempt correlation ID; it is not the idempotency key.
+      schema: { type: string, minLength: 16, maxLength: 64 }
+  schemas:
+    LifecycleRequest:
+      type: object
+      additionalProperties: false
+      required: [cluster_id, nodes, resume_context_b64]
+      properties:
+        cluster_id: { type: string }
+        nodes:
+          type: string
+          description: Slurm hostlist; expand server-side and enforce the cluster allow-list.
+          minLength: 1
+          maxLength: 4096
+          pattern: '^[A-Za-z0-9_.\[\],-]+$'
+        resume_context_b64:
+          type: string
+          contentEncoding: base64
+          maxLength: 1398104
+          description: >-
+            Exact base64 copy of SLURM_RESUME_FILE for resume; empty for
+            suspend. Treat it as untrusted scheduler input and cap decoded size.
+    LifecycleResponse:
+      type: object
+      additionalProperties: false
+      required: [operation_id, status, request_hash]
+      properties:
+        operation_id: { type: string }
+        status: { type: string, enum: [accepted, reconciling, complete] }
+        request_hash: { type: string, pattern: '^[a-f0-9]{64}$' }
+security:
+  - mutualTLS: []

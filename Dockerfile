@@ -65,6 +65,10 @@ RUN test "${MUNGE_SHA256}" != "" && \
 # features, not best-effort autodetection. The explicit rpmbuild switches and
 # post-build assertions turn a missing repository package into a build failure
 # instead of producing an image that starts but lacks a security plugin.
+# UBI 10.2 installs GA kernel headers as a compiler dependency, while current
+# Stream 10 libbpf-devel requires newer Stream headers. They are header-only
+# builder inputs, so the signed Stream replacement is explicitly permitted;
+# no builder package is copied into the final image except our RPM artifacts.
 RUN test "${SLURM_SHA256}" != "" && \
     curl --fail --location --retry 5 \
         --output "slurm-${SLURM_VERSION}.tar.bz2" \
@@ -84,7 +88,9 @@ RUN test "${SLURM_SHA256}" != "" && \
         --setopt=stream-appstream.priority=200 \
         --setopt=stream-crb.priority=200 \
     ) && \
-    dnf -y "${stream_repos[@]}" install \
+    dnf -y "${stream_repos[@]}" --disablerepo='*' \
+        --enablerepo=stream-appstream upgrade kernel-headers && \
+    dnf -y "${stream_repos[@]}" --allowerasing install \
         dbus-devel json-c-devel kernel-headers libbpf-devel libjwt-devel \
         libyaml-devel llhttp-devel mariadb-connector-c-devel s2n-tls-devel && \
     dnf -y "${stream_repos[@]}" builddep /tmp/slurm.spec && \
@@ -190,7 +196,7 @@ RUN munge_uid=$(id -u munge) && munge_gid=$(id -g munge) && \
     fi && \
     if [[ $munge_uid != 64029 ]]; then \
         ! getent passwd 64029 >/dev/null 2>&1 && \
-            usermod --uid 64029 --gid 64029 --home-dir /var/lib/munge munge; \
+            usermod --uid 64029 --gid 64029 --home /var/lib/munge munge; \
     fi && \
     chown -R munge:munge /etc/munge /var/lib/munge /var/log/munge && \
     ! getent group 64030 >/dev/null 2>&1 && ! getent passwd 64030 >/dev/null 2>&1 && \

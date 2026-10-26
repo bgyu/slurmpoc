@@ -15,7 +15,7 @@ readonly RUNTIME_JWKS=$RUNTIME_CONFIG_DIR/slurm-jwks.json
 readonly RUNTIME_STORAGE_CA=$RUNTIME_CONFIG_DIR/storage_ca.pem
 
 role=${CONTAINER_ROLE:-}
-profile=${SLURM_PROFILE:-production}
+profile=${CLUSTER_DEPLOYMENT_PROFILE:-production}
 declare -a child_pids=()
 
 log() {
@@ -265,7 +265,7 @@ PY
 }
 
 prepare_jwt_trust() {
-    local source size
+    local source size trust_owner
     case "$profile:$role" in
         simulation:controller|simulation:slurmdbd)
             source=${SLURM_JWT_KEY_FILE:-}
@@ -275,12 +275,14 @@ prepare_jwt_trust() {
             ((size >= 32)) || die 'HS256 JWT key must contain at least 32 random bytes'
             stage_file "$source" "$RUNTIME_JWT_KEY" slurm slurm 0400
             ;;
-        production:controller|production:slurmdbd)
+        production:controller|production:slurmdbd|production:restd)
             source=${SLURM_JWKS_FILE:-}
             [[ -n $source ]] || die 'SLURM_JWKS_FILE is required in production'
             validate_input_file "$source" 'RS256 JWKS trust file' public
             validate_jwks "$source"
-            stage_file "$source" "$RUNTIME_JWKS" slurm slurm 0400
+            trust_owner=slurm
+            [[ $role != restd ]] || trust_owner=slurmrestd
+            stage_file "$source" "$RUNTIME_JWKS" "$trust_owner" "$trust_owner" 0400
             ;;
     esac
 }
@@ -363,6 +365,100 @@ wait_for_port() {
         sleep 2
     done
     die "timed out waiting for $description at $host:$port"
+}
+
+# Populate HOST_CANDIDATES from an optional operator override or one or more
+# repeated Slurm configuration keys.  Keeping collection separate from the
+# network wait makes HA behavior identical for controllers, computes and REST.
+# The singular override names remain supported for backwards compatibility;
+# their plural counterparts accept a comma-separated ordered list.
+collect_host_candidates() {
+    local override=$1 file=$2 key value
+    shift 2
+    HOST_CANDIDATES=()
+
+    if [[ -n $override ]]; then
+        IFS=',' read -r -a HOST_CANDIDATES <<<"$override"
+    else
+        for key in "$@"; do
+            while IFS= read -r value; do
+                [[ -n $value ]] && HOST_CANDIDATES+=("$value")
+            done < <(config_values "$key" "$file")
+        done
+    fi
+}
+
+# Slurm host parameters optionally use HostName(communications-address)
+# syntax.  Probe the address inside parentheses, while retaining strict DNS or
+# IPv4 validation and refusing ambiguous/nested forms.  IPv6 is intentionally
+# not accepted by this image contract until bracketed endpoint parsing is
+# implemented consistently for configless and database endpoints.
+normalize_probe_host() {
+    local value=$1 host
+    value=${value#"${value%%[![:space:]]*}"}
+    value=${value%"${value##*[![:space:]]}"}
+    if [[ $value =~ ^([^()]+)\(([^()]+)\)$ ]]; then
+        host=${BASH_REMATCH[2]}
+    elif [[ $value == *'('* || $value == *')'* ]]; then
+        return 1
+    else
+        host=$value
+    fi
+    validate_host "$host" 'configured endpoint host' || return 1
+    printf '%s\n' "$host"
+}
+
+# Wait until any member of an HA endpoint set accepts a TCP connection.  Each
+# individual connect and the number of rounds are bounded.  A failed primary
+# therefore cannot prevent a daemon from starting against a healthy backup,
+# while an empty or malformed endpoint set still fails closed before startup.
+wait_for_any_port() {
+    local port=$1 description=$2 attempts=$3 raw host existing attempt
+    local -a hosts=()
+    shift 3
+
+    validate_uint "$port" 1 65535 "$description port"
+    validate_uint "$attempts" 1 600 "$description wait attempts"
+    (($#)) || die "no $description endpoints are configured"
+
+    for raw in "$@"; do
+        host=$(normalize_probe_host "$raw") ||
+            die "invalid $description endpoint host: $raw"
+        for existing in "${hosts[@]}"; do
+            [[ $existing == "$host" ]] && continue 2
+        done
+        hosts+=("$host")
+    done
+    ((${#hosts[@]})) || die "no usable $description endpoints are configured"
+
+    for ((attempt = 1; attempt <= attempts; attempt++)); do
+        for host in "${hosts[@]}"; do
+            if timeout 1 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$host" "$port" \
+                    2>/dev/null; then
+                log "$description endpoint is reachable at $host:$port"
+                return 0
+            fi
+        done
+        sleep 2
+    done
+    die "timed out waiting for $description on port $port at: ${hosts[*]}"
+}
+
+wait_for_any_controller() {
+    local override port
+    override=${SLURM_CONTROLLER_HOSTS:-${SLURM_CONTROLLER_HOST:-}}
+    port=${SLURM_CONTROLLER_PORT:-$(config_value SlurmctldPort "$SLURM_CONF")}
+    collect_host_candidates "$override" "$SLURM_CONF" SlurmctldHost
+    wait_for_any_port "$port" slurmctld 90 "${HOST_CANDIDATES[@]}"
+}
+
+wait_for_any_slurmdbd() {
+    local override port
+    override=${SLURMDBD_HOSTS:-${SLURMDBD_HOST:-}}
+    port=${SLURMDBD_PORT:-$(config_value AccountingStoragePort "$SLURM_CONF")}
+    collect_host_candidates "$override" "$SLURM_CONF" \
+        AccountingStorageHost AccountingStorageBackupHost
+    wait_for_any_port "$port" slurmdbd 90 "${HOST_CANDIDATES[@]}"
 }
 
 read_password_file() {
@@ -531,8 +627,13 @@ run_slurmdbd() {
     port=$(<"$RUNTIME_DIR/storage-port")
     wait_for_port "$host" "$port" 'accounting database'
     log 'starting slurmdbd as uid 64030 (slurm)'
-    runuser --user slurm -- slurmdbd -D -v \
-        -f "$RUNTIME_CONFIG_DIR/slurmdbd.conf" &
+    # slurmdbd has no config-file CLI option.  Slurm's supported SLURM_CONF
+    # contract selects the configuration directory, from which the daemon
+    # loads the adjacent slurmdbd.conf.  Passing `-f` silently selected an
+    # unrelated daemon flag on older versions and is therefore forbidden.
+    runuser --user slurm -- env \
+        SLURM_CONF="$RUNTIME_CONFIG_DIR/slurm.conf" \
+        slurmdbd -D -v &
     child_pids+=("$!")
 }
 
@@ -550,21 +651,21 @@ register_simulation_accounting() {
     fi
     if ! sacctmgr --noheader --parsable2 show association \
             where "Cluster=$cluster_name" User=workflow \
-            format=Cluster,User 2>/dev/null | grep -Fq "$cluster_name|workflow|"; then
+            format=Cluster,User 2>/dev/null | grep -Fxq "$cluster_name|workflow"; then
         sacctmgr --immediate add user workflow Account=demo "Cluster=$cluster_name"
     fi
 }
 
 run_controller() {
-    local dbd_host dbd_port
     prepare_slurm_config
     prepare_munge
     prepare_jwt_trust
     prepare_tls_identity
 
-    dbd_host=${SLURMDBD_HOST:-$(config_value AccountingStorageHost "$SLURM_CONF")}
-    dbd_port=${SLURMDBD_PORT:-$(config_value AccountingStoragePort "$SLURM_CONF")}
-    wait_for_port "$dbd_host" "$dbd_port" slurmdbd
+    # Do not pin startup to the primary accounting daemon.  slurmctld itself
+    # understands the primary/backup pair from slurm.conf, so its readiness
+    # gate should admit startup when either configured member is available.
+    wait_for_any_slurmdbd
     [[ $profile == production ]] || register_simulation_accounting
 
     install -d -o slurm -g slurm -m 0700 /var/spool/slurmctld
@@ -588,16 +689,17 @@ require_production_compute_isolation() {
 }
 
 run_compute() {
-    local controller feature=${SLURMD_FEATURE:-} conf_server=${SLURM_CONF_SERVER:-}
+    local feature=${SLURMD_FEATURE:-} conf_server=${SLURM_CONF_SERVER:-}
+    local simulation_node_conf
     prepare_slurm_config
     prepare_munge
     prepare_tls_identity
     [[ $profile == simulation ]] || require_production_compute_isolation
 
-    controller=${SLURM_CONTROLLER_HOST:-$(config_values SlurmctldHost "$SLURM_CONF" | head -n1)}
-    [[ $controller != *'('* ]] ||
-        die 'set SLURM_CONTROLLER_HOST when SlurmctldHost uses address syntax'
-    wait_for_port "$controller" 6817 slurmctld
+    # A backup controller is sufficient to start a node.  Probing every
+    # SlurmctldHost also supports HostName(address) syntax without requiring a
+    # second, potentially divergent copy of controller addresses in the env.
+    wait_for_any_controller
     install -d -o root -g root -m 0755 /var/spool/slurmd
     if [[ $profile == production ]]; then
         install -d -o root -g root -m 0755 /var/lib/slurm/job_container
@@ -610,8 +712,19 @@ run_compute() {
             usage_error 'SLURMD_FEATURE must be one literal feature name'
         [[ $conf_server =~ ^[A-Za-z0-9_.:-]+(,[A-Za-z0-9_.:-]+)*$ ]] ||
             usage_error 'SLURM_CONF_SERVER must be a comma-separated controller list'
-        log "starting dynamic FUTURE slurmd for $(hostname -s), profile $feature"
-        slurmd -D -v --conf-server "$conf_server" "-F${feature}" &
+        if [[ $profile == simulation ]]; then
+            # A rootless container sees the WSL VM's physical topology;
+            # Podman's CPU quota does not change `slurmd -C`. Dynamic-normal
+            # registration gives the integration profile a deterministic
+            # synthetic shape. MaxNodeCount remains the controller-side bound.
+            simulation_node_conf="CPUs=2 Boards=1 SocketsPerBoard=1 CoresPerSocket=2 ThreadsPerCore=1 RealMemory=1024 Feature=$feature"
+            log "starting dynamic simulation slurmd for $(hostname -s), profile $feature"
+            slurmd -D -v --conf-server "$conf_server" -Z \
+                --conf "$simulation_node_conf" &
+        else
+            log "starting dynamic FUTURE slurmd for $(hostname -s), profile $feature"
+            slurmd -D -v --conf-server "$conf_server" "-F${feature}" &
+        fi
     else
         log "starting statically named slurmd for $(hostname -s)"
         slurmd -D -v &
@@ -622,6 +735,10 @@ run_compute() {
 run_restd() {
     local listen=${SLURMRESTD_LISTEN:-} threads api_version auth_mode
     prepare_slurm_config
+    # Production REST validates external RS256 identities with public JWKS.
+    # The simulation uses the controller-issued HS256 token without copying
+    # the symmetric signing key into this container.
+    prepare_jwt_trust
     # MUNGE is optional for JWT-only REST. The integration profile starts it
     # for CLI diagnostics; production can omit the cluster-wide MUNGE key.
     if [[ ${START_EMBEDDED_MUNGE:-0} == 1 ]]; then
@@ -648,7 +765,7 @@ run_restd() {
             usage_error 'simulation SLURMRESTD_LISTEN must be host:port'
     fi
 
-    wait_for_port "${SLURM_CONTROLLER_HOST:-controller}" 6817 slurmctld
+    wait_for_any_controller
     log "starting JWT-only slurmrestd as uid 64031 with $threads bounded threads"
     runuser --user slurmrestd -- env \
         SLURM_CONF="$SLURM_CONF" \
@@ -664,7 +781,7 @@ run_token_issuer() {
         die 'the built-in token issuer is forbidden outside the simulation profile'
     prepare_slurm_config
     prepare_munge
-    wait_for_port "${SLURM_CONTROLLER_HOST:-controller}" 6817 slurmctld
+    wait_for_any_controller
 
     # This helper never receives the JWT signing key.  It authenticates to
     # slurmctld with MUNGE as SlurmUser and atomically publishes only a
@@ -721,7 +838,7 @@ wait_for_essential_process() {
 require_root_supervisor
 case "$profile" in
     simulation|production) ;;
-    *) usage_error 'SLURM_PROFILE must be simulation or production' ;;
+    *) usage_error 'CLUSTER_DEPLOYMENT_PROFILE must be simulation or production' ;;
 esac
 case "$role" in
     database|slurmdbd|controller|compute|restd|token-issuer|broker) ;;

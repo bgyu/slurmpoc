@@ -75,6 +75,20 @@ if [[ -f $runtime_dir/cluster.env ]] && \
     mv -- "$filtered_env" "$runtime_dir/cluster.env"
 fi
 
+# Earlier revisions used SLURM_PROFILE for the deployment selector. Slurm's
+# own CLI reserves that variable for job profiling, so migrate it out of the
+# SLURM_* namespace without changing any user-selected non-secret settings.
+if [[ -f $runtime_dir/cluster.env ]] && \
+        grep -Eq '^(SLURM_PROFILE|SLURM_DEPLOYMENT_PROFILE)=' \
+            "$runtime_dir/cluster.env"; then
+    migrated_env=$(mktemp --tmpdir="$runtime_dir" '.cluster-env.XXXXXXXX')
+    grep -Ev '^(SLURM_PROFILE|SLURM_DEPLOYMENT_PROFILE|CLUSTER_DEPLOYMENT_PROFILE)=' \
+        "$runtime_dir/cluster.env" >"$migrated_env" || true
+    printf 'CLUSTER_DEPLOYMENT_PROFILE=simulation\n' >>"$migrated_env"
+    chmod 0600 "$migrated_env"
+    mv -- "$migrated_env" "$runtime_dir/cluster.env"
+fi
+
 # MUNGE recommends a high-entropy key.  It is shared by every Slurm daemon but
 # never by MariaDB-only, gateway-only, or client processes.
 create_random_file "$secret_dir/munge.key" 1024 raw
@@ -101,7 +115,7 @@ if [[ ! -e $runtime_dir/cluster.env ]]; then
     temporary=$(mktemp --tmpdir="$runtime_dir" '.cluster-env.XXXXXXXX')
     {
         printf 'SLURM_IMAGE_TAG=latest\n'
-        printf 'SLURM_PROFILE=simulation\n'
+        printf 'CLUSTER_DEPLOYMENT_PROFILE=simulation\n'
         printf 'SLURM_API_VERSION=v0.0.45\n'
     } >"$temporary"
     chmod 0600 "$temporary"

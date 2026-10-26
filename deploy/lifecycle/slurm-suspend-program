@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+[[ $# -eq 1 ]] || { printf 'usage: slurm-suspend-program NODE_HOSTLIST\n' >&2; exit 64; }
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=lifecycle-common.sh
+source "$script_dir/lifecycle-common.sh"
+lifecycle_init
+lifecycle_request suspend "$1"

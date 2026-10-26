@@ -6,7 +6,7 @@
 set -euo pipefail
 
 role=${CONTAINER_ROLE:-}
-profile=${SLURM_PROFILE:-production}
+profile=${CLUSTER_DEPLOYMENT_PROFILE:-production}
 runtime_conf=/run/slurm/config/slurm.conf
 
 if [[ -r $runtime_conf ]]; then
@@ -32,9 +32,9 @@ case "$role" in
     compute)
         pgrep -u root -x slurmd >/dev/null
         host=$(hostname -s)
-        # Dynamic FUTURE allocation deliberately gives NodeName (computeNNN)
-        # and NodeHostName (compute-host-NNN) different values. Match the
-        # latter instead of assuming that the container hostname is NodeName.
+        # Dynamic registration uses the container's hostname as NodeHostName.
+        # Match that field so this also remains correct for production FUTURE
+        # nodes whose assigned NodeName can differ from their host name.
         timeout 5 scontrol show nodes --oneliner 2>/dev/null | \
             awk -v wanted="$host" '
                 {

@@ -12,7 +12,7 @@ set -Eeuo pipefail
     printf 'dev-token-renewer: development issuer was not explicitly enabled\n' >&2
     exit 78
 }
-[[ ${SLURM_PROFILE:-simulation} == simulation ]] || {
+[[ ${CLUSTER_DEPLOYMENT_PROFILE:-simulation} == simulation ]] || {
     printf 'dev-token-renewer: refusing to run outside the simulation profile\n' >&2
     exit 78
 }

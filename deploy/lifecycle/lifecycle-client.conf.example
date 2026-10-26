@@ -1,0 +1,17 @@
+# Install as /etc/slurm/lifecycle-client.conf, root:slurm mode 0640.
+# This file contains paths and policy bounds, never certificate private data.
+
+API_URL=https://lifecycle.internal.example
+CLUSTER_ID=production-a
+TLS_CA_FILE=/run/slurm-lifecycle/ca.pem
+TLS_CERT_FILE=/run/slurm-lifecycle/client.pem
+TLS_KEY_FILE=/run/slurm-lifecycle/client-key.pem
+
+# Keep these below Slurm ResumeTimeout/SuspendTimeout.  The API acknowledges a
+# durable intent; it must not hold the request open until an EC2 instance boots.
+CONNECT_TIMEOUT_SECONDS=3
+TOTAL_TIMEOUT_SECONDS=15
+
+# The resume JSON is scheduler input, not a trusted configuration file.  Bound
+# it before base64 expansion and before it crosses the control-plane API.
+MAX_RESUME_CONTEXT_BYTES=1048576
