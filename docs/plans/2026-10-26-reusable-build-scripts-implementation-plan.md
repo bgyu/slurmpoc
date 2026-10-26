@@ -1,5 +1,9 @@
 # Reusable build scripts implementation plan
 
+Status: completed on 2026-10-26 in commit `6b803ba`. This file preserves the
+implementation sequence; current operating details are maintained in
+`docs/operations/build-and-runtime.md`.
+
 ## 1. Shared configuration and validation
 
 - Add `build/versions.conf` containing pinned public version and digest data.
@@ -61,3 +65,10 @@ selection implementation.
 - Restart the local cluster on preserved volumes.
 - Run the full local acceptance suite.
 - Commit implementation and documentation with a clean worktree.
+
+Completion evidence: two clean UBI 10.2 builds succeeded; the final validated
+image was `3473d6c90bdfc743d327a4d593ea915f4a3c3fc65a9b2dcf204597601cc7ace3`.
+The full acceptance suite passed manifest/source-pin validation, daemon and job
+identity checks, five-node scheduling/accounting, a REST-submitted workflow
+with 20 validated chunks, and dynamic-node add/place/drain/remove. The live
+controller remained directly inspectable with `podman exec controller sinfo`.

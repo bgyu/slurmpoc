@@ -1,6 +1,8 @@
 # Reusable Slurm build, install, and configuration scripts
 
-Status: approved on 2026-10-26
+Status: implemented and acceptance-tested on 2026-10-26 in commit `6b803ba`.
+The detailed operator/implementation reference is
+`docs/operations/build-and-runtime.md`.
 
 ## Purpose
 
@@ -19,7 +21,8 @@ into secret-generation or daemon-startup tools.
 
 This root-only build-stage command:
 
-1. validates versions, SHA-256 values, output/work paths, and architecture;
+1. validates versions, SHA-256 values, output/work paths, root privilege, and
+   the EL10 platform contract;
 2. configures only the signed dependency repositories required for the build;
 3. downloads and verifies MUNGE and Slurm archives before extracting specs;
 4. installs build dependencies;
@@ -42,7 +45,8 @@ This root-only runtime-stage command:
 
 1. validates the package directory and `BUILD-MANIFEST` without following
    symbolic links;
-2. verifies every recorded RPM hash before invoking the package manager;
+2. verifies every recorded RPM hash and matches the manifest source pins to
+   the approved version file before invoking the package manager;
 3. selects exactly the required MUNGE and Slurm runtime RPM names, excluding
    debug, source, and development packages;
 4. configures signed runtime dependency repositories;

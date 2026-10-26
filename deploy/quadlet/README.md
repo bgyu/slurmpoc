@@ -13,6 +13,11 @@ enforce the port matrix in `docs/operations/aws-deployment.md`.
 
 ## 1. Install an immutable image reference
 
+Build, manifest validation, runtime package selection and fixed identity
+creation are defined in `docs/operations/build-and-runtime.md`. Production CI
+must complete that contract, SBOM/vulnerability gates and acceptance before
+publishing the digest used here. Quadlet hosts never run the RPM builder.
+
 Install a promoted image by digest only:
 
 ```bash

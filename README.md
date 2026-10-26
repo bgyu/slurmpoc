@@ -94,6 +94,11 @@ podman build --format docker \
   --file Dockerfile .
 ```
 
+The complete phase contract—including every input, selected RPM, directory
+mode, identity, manifest rule, manual-container invocation, failure mode and
+CI promotion gate—is in the
+[package build and runtime implementation](docs/operations/build-and-runtime.md).
+
 `build-rpms.sh` verifies source archives before extraction, builds MUNGE first,
 then builds Slurm with REST/JWT, MySQL accounting, YAML, `tls/s2n`, cgroup v2,
 and namespace plugins. The final image contains:
@@ -227,6 +232,7 @@ Production replaces local files with Secrets Manager/Vault and workload PKI:
 Read these before adapting the examples:
 
 - [architecture and threat model](docs/plans/2026-10-23-production-slurm-design.md)
+- [package build and runtime implementation](docs/operations/build-and-runtime.md)
 - [implementation rationale](docs/plans/2026-10-23-production-implementation-plan.md)
 - [AWS deployment contract](docs/operations/aws-deployment.md)
 - [production operations runbook](docs/operations/production-runbook.md)

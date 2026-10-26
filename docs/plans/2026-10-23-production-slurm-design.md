@@ -99,21 +99,32 @@ database, which is never the documented production topology.
 
 ## 4. Build and supply-chain design
 
-The multi-stage Containerfile performs the following operations:
+The checked-in Dockerfile is orchestration for three independently callable,
+root-only EL10 commands:
 
-1. Download explicit MUNGE and Slurm release archives over TLS.
-2. Verify configured SHA-256 digests before extracting or executing RPM spec
-   content.  Production CI must fail if a digest is omitted.
-3. Build MUNGE first and install only its build artifacts into the Slurm build
-   stage.
-4. Build Slurm with MySQL accounting, JWT, REST, HTTP parser, JSON, YAML, and
-   cgroup support.  The build asserts that required RPMs were produced.
-5. Copy source and binary RPMs to `/var/packages/SRPMS` and
-   `/var/packages/RPMS` in the runtime image.
-6. Install the verified local RPMs and fail the build if required plugins or
-   daemons are missing.
-7. Record source versions and digests as OCI labels and emit a package
-   manifest under `/var/packages/BUILD-MANIFEST`.
+1. `scripts/build-rpms.sh` parses pinned public inputs from
+   `build/versions.conf` as data, configures signed dependency repositories,
+   verifies MUNGE and Slurm archives before extracting RPM specs, builds MUNGE
+   first, and then builds Slurm with MySQL accounting, JWT, REST, HTTP parser,
+   YAML, TLS and cgroup-v2 support.
+2. The builder publishes all source and binary RPMs beneath
+   `/var/packages/{SRPMS,RPMS}` and writes `BUILD-MANIFEST` last. The manifest
+   records both upstream version/digest pairs and a relative-path SHA-256 for
+   every RPM. Validation requires the recorded and actual RPM sets to match
+   exactly and rejects symlinks or unsafe paths.
+3. `scripts/install-runtime.sh` verifies both RPM hashes and approved source
+   pins before DNF sees a local package. It selects only the required MUNGE,
+   Slurm, controller, compute, accounting and REST runtime RPM names, then
+   fails if a daemon, plugin or shared-library dependency is missing.
+4. `scripts/configure-runtime.sh` creates or validates fixed service
+   identities, directory modes, immutable configuration profiles, lifecycle
+   helpers and workflow assets. It never generates or accepts secret values.
+5. OCI labels record source provenance. The Docker build removes its temporary
+   source-asset copy but deliberately retains the complete `/var/packages`
+   evidence directory.
+
+The exact interfaces, failure behavior, ownership table and CI commands are
+documented in `docs/operations/build-and-runtime.md`.
 
 Production CI additionally signs the image, creates an SBOM and vulnerability
 report, and promotes the image by digest between environments.  Runtime hosts
@@ -326,7 +337,7 @@ Using only `afterok` would strand finalization when one array element fails.
 
 ## 11. AWS deployment mapping
 
-The repository will include parameterized examples rather than embedding AWS
+The repository includes parameterized examples rather than embedding AWS
 account identifiers:
 
 - private subnets across availability zones;

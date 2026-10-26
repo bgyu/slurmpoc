@@ -58,6 +58,12 @@ If capacity or shapes change, update node records, partition membership and
 The full topology, port matrix, secret ownership, storage choices and rollout
 procedure are in `docs/operations/aws-deployment.md`.
 
+The image supplied to launch templates must be produced and promoted through
+the three-phase build/install/configuration contract in
+`docs/operations/build-and-runtime.md`. AWS hosts pull the signed digest; they
+do not compile Slurm, contact public source repositories, or select versions
+at boot.
+
 `materialize-aws-secret` and `slurm-secret@.service` are an optional host-side
 Secrets Manager bridge.  Install the script as
 `/usr/local/libexec/slurm/materialize-aws-secret`, the unit as

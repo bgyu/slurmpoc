@@ -148,6 +148,26 @@ class BuildScriptTests(unittest.TestCase):
         for key in ("SLURM_VERSION", "SLURM_SHA256", "MUNGE_VERSION", "MUNGE_SHA256"):
             self.assertIn(f"ARG {key}={values[key]}", dockerfile)
 
+    def test_cluster_up_defaults_match_versions_file(self) -> None:
+        values: dict[str, str] = {}
+        for line in (ROOT / "build" / "versions.conf").read_text().splitlines():
+            if line and not line.startswith("#"):
+                key, value = line.split("=", 1)
+                values[key] = value
+        cluster_up = (ROOT / "scripts" / "cluster-up.sh").read_text(
+            encoding="utf-8"
+        )
+        shell_names = {
+            "SLURM_VERSION": "slurm_version",
+            "SLURM_SHA256": "slurm_sha256",
+            "MUNGE_VERSION": "munge_version",
+            "MUNGE_SHA256": "munge_sha256",
+        }
+        for key, shell_name in shell_names.items():
+            self.assertIn(
+                f"{shell_name}=${{{key}:-{values[key]}}}", cluster_up
+            )
+
     def test_configuration_phase_never_generates_secret_material(self) -> None:
         script = (ROOT / "scripts" / "configure-runtime.sh").read_text(
             encoding="utf-8"

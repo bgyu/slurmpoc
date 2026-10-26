@@ -285,8 +285,12 @@ invocations safe.
 
 ## 9. Image/host bootstrap sequence
 
-1. Build once in CI from pinned source hashes.  Generate SBOM and vulnerability
-   evidence, sign the image, and promote the same digest into production ECR.
+1. Build once in CI through `scripts/build-rpms.sh`,
+   `scripts/install-runtime.sh`, and `scripts/configure-runtime.sh` as defined
+   in `docs/operations/build-and-runtime.md`. Verify source pins and every RPM
+   against `/var/packages/BUILD-MANIFEST`, generate SBOM and vulnerability
+   evidence, sign the image/provenance, and promote the same digest into
+   production ECR.
 2. Bake a RHEL-compatible AMI with Podman, Quadlet, AWS CLI/credential helper,
    SSSD client, time sync, log forwarding and the organization PKI agent.
 3. Verify the image signature/digest before allowing the Quadlet image unit to

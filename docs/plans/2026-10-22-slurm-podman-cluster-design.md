@@ -1,8 +1,11 @@
 # Slurm Podman simulation cluster design
 
+Status: implemented; build details superseded by the reusable three-phase
+implementation documented in `docs/operations/build-and-runtime.md`.
+
 ## Goal
 
-Build Slurm and MUNGE RPMs from their latest source releases on UBI 10.2,
+Build Slurm and MUNGE RPMs from explicitly pinned source releases on UBI 10.2,
 retain the artifacts below `/var/packages`, install those artifacts into the
 same image, and use that image for a local Slurm simulation consisting of one
 controller, one MariaDB service, one `slurmdbd` service, and five compute
@@ -11,11 +14,15 @@ use the same image.
 
 ## Architecture
 
-The multi-stage Dockerfile builds upstream MUNGE first and installs its newly
-built development RPMs in the builder. It then builds the upstream Slurm RPMs
-with MariaDB accounting support. Binary and source RPMs are copied into the
-runtime image under `/var/packages/RPMS` and `/var/packages/SRPMS`; `dnf`
-installs the binary artifacts and resolves their runtime dependencies.
+The multi-stage Dockerfile delegates to three independently callable commands.
+`build-rpms.sh` builds upstream MUNGE first and installs its newly built
+development RPMs in the disposable builder, then builds the upstream Slurm
+RPMs with accounting, REST, JWT, TLS, YAML and cgroup-v2 support.
+`install-runtime.sh` verifies the complete artifact manifest and installs only
+the runtime RPM subset. `configure-runtime.sh` creates fixed service
+identities and installs immutable profiles/helpers without generating a
+secret. Binary and source RPMs remain under `/var/packages/RPMS` and
+`/var/packages/SRPMS` in the final image.
 
 Every cluster service uses the resulting image. A role-aware entrypoint starts
 only the service selected for that container. MariaDB and `slurmdbd` are
@@ -39,6 +46,11 @@ performance benchmarking.
 
 ## Verification
 
-Shell syntax, Compose rendering, and the image build should be checked locally.
+Shell syntax, Compose rendering, and the image build are checked locally.
 The smoke test waits for five idle nodes, prints `sinfo`, and runs `hostname`
 once on each node through `srun`.
+
+The authoritative verification command is `scripts/acceptance-test.sh --start`.
+It additionally checks RPM provenance, daemon identities, private listeners,
+accounting, REST master/worker fan-out and elastic-node scale out/in. The
+stable direct inspection command is `podman exec controller sinfo`.

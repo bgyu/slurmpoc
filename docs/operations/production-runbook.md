@@ -4,6 +4,21 @@ Use this runbook with the approved production design and the AWS contract.  A
 change is not complete merely because a container is running: verify scheduler
 state, accounting, authentication, isolation and rollback at every stage.
 
+## Release artifact prerequisite
+
+Build and promote the image through the complete procedure in
+`docs/operations/build-and-runtime.md`. In summary, CI must start from a clean,
+reviewed Git commit; build the RPMs from the pinned version/digest file; verify
+the exact manifest and installed runtime subset; configure the immutable
+filesystem without secrets; run local acceptance; generate SBOM and
+vulnerability evidence; sign the image/provenance; and publish one immutable
+digest. Staging and production consume that digest. Runtime hosts never build
+Slurm or retrieve upstream source archives.
+
+The release record must retain the Git commit, source pins, complete
+`BUILD-MANIFEST`, OCI digest, SBOM digest, scan-policy result, signature
+identity, acceptance result and any database/state compatibility decision.
+
 ## 1. Initial deployment
 
 1. Record the change ticket, exact Git commit, OCI image digest, SBOM digest,
@@ -139,6 +154,13 @@ plugin compatibility.  Back up and restore-test before the first upgraded
 daemon.  The conservative order is database backup, accounting daemons,
 controllers, REST/broker, then drained compute batches, subject to the selected
 Slurm version's documented compatibility window.
+
+Change each source version only with its matching SHA-256. Keep
+`build/versions.conf`, Dockerfile defaults and `cluster-up.sh` local defaults
+in sync, build into a new empty artifact directory, and require the installer
+to match manifest source pins to the approved version file. Never edit a
+manifest to make a check pass. Re-run the full build/runtime and target-account
+acceptance gates before signing the replacement digest.
 
 Keep the previous signed digest and AMI available through the rollback window.
 Do not downgrade after an irreversible state/database migration without the

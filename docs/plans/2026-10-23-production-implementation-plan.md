@@ -1,5 +1,10 @@
 # Production Slurm implementation plan
 
+Status: implemented as the repository production contract. Account-specific
+IaC, OIDC gateways, PKI/renewal agents, the lifecycle reconciler and
+allocation-private capability delivery remain external production
+dependencies rather than silently simulated components.
+
 This plan implements the approved design in independently testable layers.
 Each completed layer is recorded as a focused Git commit so the build,
 security decisions, workflow service, and deployment examples can be reviewed
@@ -7,8 +12,11 @@ or reverted independently.
 
 ## Layer 1: build and runtime contract
 
-- Harden the Containerfile with version/digest inputs, required plugin checks,
-  fixed service users, and a build manifest in `/var/packages`.
+- Harden the Dockerfile with version/digest inputs, required plugin checks,
+  fixed service users, and a build manifest in `/var/packages`. The completed
+  implementation delegates those responsibilities to `build-rpms.sh`,
+  `install-runtime.sh`, and `configure-runtime.sh`; see
+  `docs/operations/build-and-runtime.md`.
 - Replace the multi-daemon database role with separate MariaDB and `slurmdbd`
   roles in the production contract.  The local profile may still use one
   image, but every daemon remains a distinct process/container.
@@ -60,3 +68,17 @@ broker around an ambiguous submission; verify one master and one array.
 
 Verification: lint configuration, render Compose/Quadlet definitions, run the
 acceptance suite, and document limitations not testable inside WSL.
+
+## Implementation history
+
+The focused Git history is:
+
+- `6f44fc8`: approved production architecture and threat model;
+- `2e2e6ca`: hardened source build and runtime image;
+- `e86af0c`: secure REST-driven workflow implementation;
+- `c47894f`: AWS/Quadlet deployment contract; and
+- `eab278f`, `f043de5`, `6b803ba`: reusable build-phase design, plan and
+  implementation.
+
+The history is evidence of review boundaries, not a substitute for image
+signing, target-account acceptance or an auditable deployment change record.
