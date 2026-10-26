@@ -1,0 +1,79 @@
+[Unit]
+Description=Slurm compute daemon (%i)
+Wants=network-online.target
+After=network-online.target remote-fs.target
+RequiresMountsFor=/srv/slurm/shared /var/lib/slurm/slurmd/%i /var/lib/slurm/job-container/%i
+
+[Container]
+Image=slurm-runtime.image
+ContainerName=slurmd-%i
+HostName=%i
+Network=host
+Pull=never
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=all
+# slurmd remains root so it can enter the submitting user's identity, create
+# job mount namespaces, and enforce cgroup-v2/device boundaries.  This is still
+# narrower than --privileged; remove capabilities only after exercising the
+# site's MPI, GRES and prolog/epilog paths in a staging cluster.
+AddCapability=CAP_AUDIT_WRITE CAP_BPF CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_IPC_LOCK CAP_KILL CAP_MKNOD CAP_PERFMON CAP_SETGID CAP_SETUID CAP_SYS_ADMIN CAP_SYS_NICE CAP_SYS_RESOURCE
+Environment=CONTAINER_ROLE=compute
+Environment=CLUSTER_DEPLOYMENT_PROFILE=production
+Environment=START_EMBEDDED_MUNGE=1
+Environment=SLURM_CONFIG_FILE=/run/site/slurm.conf
+Environment=MUNGE_KEY_FILE=/run/site/munge.key
+Environment=SLURM_TLS_CA_FILE=/run/site/cluster-ca.pem
+Environment=SLURM_TLS_CERT_FILE=/run/site/tls-cert.pem
+Environment=SLURM_TLS_KEY_FILE=/run/site/tls-key.pem
+# No dynamic-registration variables are set here.  The AWS power-save pool has
+# static State=CLOUD identities, so HostName=%i must register as that exact
+# NodeName.  A site using the separate FUTURE pool may opt in with the exact
+# SLURMD_FEATURE/SLURM_CONF_SERVER names understood by the entrypoint.
+EnvironmentFile=/etc/slurm-production/env/slurmd-%i.env
+Volume=/etc/slurm-production/config/slurm.conf:/run/site/slurm.conf:ro,z,nodev,nosuid,noexec
+Volume=/etc/slurm-production/trust/cluster-ca.pem:/run/site/cluster-ca.pem:ro,z,nodev,nosuid,noexec
+Volume=/run/slurm-secrets/munge.key:/run/site/munge.key:ro,z,nodev,nosuid,noexec
+Volume=/run/slurm-pki/slurmd/cert.pem:/run/site/tls-cert.pem:ro,Z,nodev,nosuid,noexec
+Volume=/run/slurm-pki/slurmd/key.pem:/run/site/tls-key.pem:ro,Z,nodev,nosuid,noexec
+Volume=/var/lib/slurm/slurmd/%i:/var/spool/slurmd:rw,Z,nodev,nosuid
+Volume=/var/lib/slurm/job-container/%i:/var/lib/slurm/job_container:rw,Z,nodev,nosuid
+# The shared path is mounted by systemd before Podman starts.  It may be EFS
+# for manifests/small results or FSx for Lustre for data-intensive work.
+Volume=/srv/slurm/shared:/shared:rw,nodev,nosuid
+# A private cgroup namespace would hide the delegated v2 hierarchy from Slurm.
+# The host unit uses Delegate=yes and exposes only this required pseudo-fs.
+Volume=/sys/fs/cgroup:/sys/fs/cgroup:rw,nodev,nosuid,noexec
+PodmanArgs=--cgroupns=host
+CgroupsMode=enabled
+Tmpfs=/run:rw,nodev,nosuid,noexec,size=256m,mode=0755
+Tmpfs=/tmp:rw,nodev,nosuid,size=1g,mode=1777
+Tmpfs=/var/log:rw,nodev,nosuid,noexec,size=256m,mode=0755
+PidsLimit=65536
+HealthCmd=/usr/local/sbin/cluster-healthcheck
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=4
+HealthStartPeriod=2min
+HealthOnFailure=kill
+Notify=healthy
+
+[Service]
+Restart=on-failure
+RestartSec=10s
+TimeoutStartSec=5min
+TimeoutStopSec=5min
+Delegate=yes
+TasksMax=infinity
+LimitNOFILE=262144
+LimitMEMLOCK=infinity
+UMask=0077
+ExecStartPre=/usr/bin/test -s /run/slurm-secrets/munge.key
+ExecStartPre=/usr/bin/test -s /run/slurm-pki/slurmd/key.pem
+ExecStartPre=/usr/bin/test -w /sys/fs/cgroup
+ExecStartPre=/usr/bin/test -w /srv/slurm/shared
+
+# There is intentionally no DefaultInstance.  Provisioning must first assign
+# an approved Slurm node name, then enable exactly that instance.
+[Install]
+WantedBy=multi-user.target

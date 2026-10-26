@@ -1,0 +1,21 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "OnlyTheLifecycleEcsServiceMayAssume",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole",
+      "Condition": {
+        "StringEquals": {
+          "aws:SourceAccount": "<ACCOUNT_ID>"
+        },
+        "ArnLike": {
+          "aws:SourceArn": "arn:aws:ecs:<REGION>:<ACCOUNT_ID>:service/<ECS_CLUSTER>/<LIFECYCLE_SERVICE>"
+        }
+      }
+    }
+  ]
+}

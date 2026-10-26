@@ -1,0 +1,71 @@
+[Unit]
+Description=Slurm workflow broker
+Wants=network-online.target
+After=network-online.target remote-fs.target
+RequiresMountsFor=/srv/slurm/shared
+
+[Container]
+Image=slurm-runtime.image
+ContainerName=slurm-workflow-broker
+HostName=workflow-broker
+Network=host
+Pull=never
+Entrypoint=/usr/bin/python3
+Exec=-m workflow
+WorkingDir=/opt/slurm-workflow
+User=64032
+Group=64032
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=all
+Environment=BROKER_PROFILE=production
+Environment=BROKER_AUTH_MODE=trusted-proxy
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=WORKFLOW_LISTEN_HOST=127.0.0.1
+Environment=WORKFLOW_LISTEN_PORT=8088
+# The broker writes the raw callback capability only to its private tmpfs.  A
+# production node-attested delivery component must make the job-visible path
+# appear inside the master allocation.  Never point both paths at shared
+# storage when multiple jobs use uid 64032.
+Environment=WORKFLOW_CAPABILITY_DIR=/run/workflow/capabilities
+Environment=WORKFLOW_CAPABILITY_JOB_DIR=/run/slurm-job-capabilities
+Environment=BROKER_DATABASE_PASSWORD_FILE=/run/site/secrets/workflow-database-password
+Environment=BROKER_DATABASE_CA_FILE=/run/site/database-ca.pem
+Environment=BROKER_TRUSTED_PROXY_TOKEN_FILE=/run/site/secrets/workflow-proxy-token
+Environment=SLURM_REST_TOKEN_FILE=/run/site/secrets/workflow-slurm-token
+Environment=SLURM_REST_CA_FILE=/run/site/slurm-api-ca.pem
+EnvironmentFile=/etc/slurm-production/env/workflow.env
+# Mount the directory, not three individual files.  A file bind pins an inode
+# and would hide an atomic host-side rename from the long-running broker.  The
+# host directory is root-owned search-only (0711); each file is uid 64032 mode
+# 0400, and dedicated broker hosts contain no other role's secrets.
+Volume=/run/slurm-secrets:/run/site/secrets:ro,Z,nodev,nosuid,noexec
+Volume=/etc/slurm-production/trust/database-ca.pem:/run/site/database-ca.pem:ro,z,nodev,nosuid,noexec
+Volume=/etc/slurm-production/trust/slurm-api-ca.pem:/run/site/slurm-api-ca.pem:ro,z,nodev,nosuid,noexec
+Volume=/srv/slurm/shared:/shared:rw,nodev,nosuid
+Tmpfs=/run:rw,nodev,nosuid,noexec,size=64m,mode=0755,uid=64032,gid=64032
+Tmpfs=/tmp:rw,nodev,nosuid,noexec,size=64m,mode=1777
+PidsLimit=512
+Memory=2G
+HealthCmd=/usr/bin/python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/readyz',timeout=3).read()"
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=4
+HealthStartPeriod=45s
+HealthOnFailure=kill
+Notify=healthy
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=2min
+TimeoutStopSec=1min
+LimitNOFILE=65536
+UMask=0077
+ExecStartPre=/usr/bin/test -s /run/slurm-secrets/workflow-database-password
+ExecStartPre=/usr/bin/test -s /run/slurm-secrets/workflow-proxy-token
+ExecStartPre=/usr/bin/test -s /run/slurm-secrets/workflow-slurm-token
+ExecStartPre=/usr/bin/test -s /etc/slurm-production/trust/slurm-api-ca.pem
+
+[Install]
+WantedBy=multi-user.target

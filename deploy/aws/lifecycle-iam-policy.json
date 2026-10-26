@@ -1,0 +1,114 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadEc2StateForReconciliation",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeImages",
+        "ec2:DescribeInstances",
+        "ec2:DescribeInstanceStatus",
+        "ec2:DescribeLaunchTemplateVersions",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeTags"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "RunOnlyTheImmutableApprovedLaunchTemplate",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "*",
+      "Condition": {
+        "ArnEquals": {
+          "ec2:LaunchTemplate": "arn:aws:ec2:<REGION>:<ACCOUNT_ID>:launch-template/<LAUNCH_TEMPLATE_ID>"
+        },
+        "Bool": {
+          "ec2:IsLaunchTemplateResource": "true"
+        },
+        "StringEquals": {
+          "aws:RequestedRegion": "<REGION>"
+        }
+      }
+    },
+    {
+      "Sid": "TagOnlyDuringApprovedLaunch",
+      "Effect": "Allow",
+      "Action": "ec2:CreateTags",
+      "Resource": [
+        "arn:aws:ec2:<REGION>:<ACCOUNT_ID>:instance/*",
+        "arn:aws:ec2:<REGION>:<ACCOUNT_ID>:network-interface/*",
+        "arn:aws:ec2:<REGION>:<ACCOUNT_ID>:volume/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "ec2:CreateAction": "RunInstances",
+          "aws:RequestedRegion": "<REGION>",
+          "aws:RequestTag/SlurmCluster": "production-a",
+          "aws:RequestTag/ManagedBy": "slurm-lifecycle"
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": [
+            "Name",
+            "SlurmCluster",
+            "SlurmNodeName",
+            "SlurmGeneration",
+            "ManagedBy",
+            "LifecycleRequestId"
+          ]
+        },
+        "Null": {
+          "aws:RequestTag/Name": "false",
+          "aws:RequestTag/SlurmNodeName": "false",
+          "aws:RequestTag/SlurmGeneration": "false",
+          "aws:RequestTag/LifecycleRequestId": "false"
+        }
+      }
+    },
+    {
+      "Sid": "TerminateOnlyOwnedClusterInstances",
+      "Effect": "Allow",
+      "Action": "ec2:TerminateInstances",
+      "Resource": "arn:aws:ec2:<REGION>:<ACCOUNT_ID>:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "<REGION>",
+          "ec2:ResourceTag/SlurmCluster": "production-a",
+          "ec2:ResourceTag/ManagedBy": "slurm-lifecycle"
+        },
+        "Null": {
+          "ec2:ResourceTag/SlurmNodeName": "false",
+          "ec2:ResourceTag/SlurmGeneration": "false"
+        }
+      }
+    },
+    {
+      "Sid": "PassOnlyComputeInstanceRoleToEc2",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::<ACCOUNT_ID>:role/<SLURM_COMPUTE_INSTANCE_ROLE>",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "ec2.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "PersistLifecycleIntents",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:ConditionCheckItem",
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:Query",
+        "dynamodb:TransactWriteItems",
+        "dynamodb:UpdateItem"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:<REGION>:<ACCOUNT_ID>:table/<LIFECYCLE_TABLE>",
+        "arn:aws:dynamodb:<REGION>:<ACCOUNT_ID>:table/<LIFECYCLE_TABLE>/index/*"
+      ]
+    }
+  ]
+}

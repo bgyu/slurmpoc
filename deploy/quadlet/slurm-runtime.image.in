@@ -1,0 +1,12 @@
+[Unit]
+Description=Digest-pinned Slurm runtime image
+
+[Image]
+# install.sh replaces this token only after validating that the reference ends
+# in a full sha256 digest.  Tags are useful for discovery, but they are not a
+# production identity because a registry can move them after approval.
+Image=@@IMAGE_REFERENCE@@
+TLSVerify=true
+
+[Service]
+TimeoutStartSec=15min

@@ -1,0 +1,73 @@
+[Unit]
+Description=Slurm controller (%i)
+Documentation=file:///usr/share/doc/slurmpoc/production-runbook.md
+Wants=network-online.target
+After=network-online.target remote-fs.target
+RequiresMountsFor=/srv/slurm/controller-state
+
+[Container]
+Image=slurm-runtime.image
+ContainerName=slurm-controller-%i
+HostName=controller-%i
+Network=host
+Pull=never
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=all
+# The image entrypoint is a small root supervisor which copies read-only
+# credentials into private tmpfs and then drops each daemon to munge/slurm.
+# These are the only capabilities that supervisor needs on a controller.
+AddCapability=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID
+Environment=CONTAINER_ROLE=controller
+Environment=CLUSTER_DEPLOYMENT_PROFILE=production
+Environment=START_EMBEDDED_MUNGE=1
+Environment=SLURM_CONFIG_FILE=/run/site/slurm.conf
+Environment=MUNGE_KEY_FILE=/run/site/munge.key
+Environment=SLURM_JWKS_FILE=/run/site/slurm-jwks.json
+Environment=SLURM_TLS_CA_FILE=/run/site/cluster-ca.pem
+Environment=SLURM_TLS_CERT_FILE=/run/site/tls-cert.pem
+Environment=SLURM_TLS_KEY_FILE=/run/site/tls-key.pem
+Environment=SLURM_LIFECYCLE_CONFIG=/etc/slurm/lifecycle-client.conf
+EnvironmentFile=/etc/slurm-production/env/controller-%i.env
+Volume=/etc/slurm-production/config/slurm.conf:/run/site/slurm.conf:ro,z,nodev,nosuid,noexec
+Volume=/etc/slurm-production/trust/slurm-jwks.json:/run/site/slurm-jwks.json:ro,z,nodev,nosuid,noexec
+Volume=/etc/slurm-production/trust/cluster-ca.pem:/run/site/cluster-ca.pem:ro,z,nodev,nosuid,noexec
+Volume=/run/slurm-secrets/munge.key:/run/site/munge.key:ro,z,nodev,nosuid,noexec
+Volume=/run/slurm-pki/controller-%i/cert.pem:/run/site/tls-cert.pem:ro,Z,nodev,nosuid,noexec
+Volume=/run/slurm-pki/controller-%i/key.pem:/run/site/tls-key.pem:ro,Z,nodev,nosuid,noexec
+# Resume/Suspend hooks execute as SlurmUser.  Their client key must therefore
+# be uid 64030 and mode 0400 on the host; it is never shared with compute jobs.
+Volume=/etc/slurm-production/lifecycle/lifecycle-client.conf:/etc/slurm/lifecycle-client.conf:ro,Z,nodev,nosuid,noexec
+Volume=/run/slurm-pki/lifecycle/ca.pem:/run/slurm-lifecycle/ca.pem:ro,Z,nodev,nosuid,noexec
+Volume=/run/slurm-pki/lifecycle/client.pem:/run/slurm-lifecycle/client.pem:ro,Z,nodev,nosuid,noexec
+Volume=/run/slurm-pki/lifecycle/client-key.pem:/run/slurm-lifecycle/client-key.pem:ro,Z,nodev,nosuid,noexec
+# Primary and backup controllers must see the same authoritative state.  This
+# host path is an already mounted durable shared filesystem, not a Podman
+# local volume.  Do not add :Z to a shared NFS/EFS/FSx mount.
+Volume=/srv/slurm/controller-state:/var/spool/slurmctld:rw,nodev,nosuid,noexec
+Tmpfs=/run:rw,nodev,nosuid,noexec,size=128m,mode=0755
+Tmpfs=/tmp:rw,nodev,nosuid,noexec,size=64m,mode=1777
+Tmpfs=/var/log:rw,nodev,nosuid,noexec,size=128m,mode=0755
+PidsLimit=2048
+Memory=4G
+HealthCmd=/usr/local/sbin/cluster-healthcheck
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=4
+HealthStartPeriod=60s
+HealthOnFailure=kill
+Notify=healthy
+
+[Service]
+Restart=on-failure
+RestartSec=10s
+TimeoutStartSec=3min
+TimeoutStopSec=2min
+LimitNOFILE=131072
+UMask=0077
+ExecStartPre=/usr/bin/test -s /run/slurm-secrets/munge.key
+ExecStartPre=/usr/bin/test -s /run/slurm-pki/controller-%i/key.pem
+ExecStartPre=/usr/bin/test -w /srv/slurm/controller-state
+
+[Install]
+WantedBy=multi-user.target

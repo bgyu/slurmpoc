@@ -93,8 +93,9 @@ firewalls express the same trust boundaries as the application configuration.
   rootful because rootless Podman cannot give `slurmd` the cgroup and identity
   controls needed for multi-user isolation.
 
-The local profile co-locates MariaDB and `slurmdbd` only to remain
-self-contained.  That role is never the documented production topology.
+The local profile runs MariaDB and `slurmdbd` in separate containers built
+from the same image. It still uses a single non-HA host and development
+database, which is never the documented production topology.
 
 ## 4. Build and supply-chain design
 
@@ -161,8 +162,10 @@ signing key therefore never appears in a compute job.
 ### 5.3 Development JWT fallback
 
 The self-contained profile may use a random 256-bit HS256 key.  It is mounted
-only into the controller, `slurmdbd`, and the development token issuer.  It is
-mode `0400`, never part of the image, and tokens expire within fifteen minutes.
+only into the controller and `slurmdbd`, mode `0400`, and never becomes part of
+the image.  The development issuer does **not** receive the signing key: it
+authenticates over the MUNGE-protected Slurm RPC channel and asks the controller
+for an ordinary `workflow` user token that expires within fifteen minutes.
 The production entrypoint rejects this mode unless an explicit development
 profile is selected.
 
@@ -173,8 +176,8 @@ profile is selected.
 | `slurm.conf`, `cgroup.conf` | `root:slurm`, `0644`, read-only | Clients need to read cluster configuration; no workload may alter it. |
 | `slurmdbd.conf` | `slurm:slurm`, `0600` | It may reference database credentials. |
 | MUNGE key | `munge:munge`, `0400`, tmpfs | Shared cluster root of trust. |
-| JWKS or HS256 trust file | `slurm:slurm`, `0400` | Replacement changes REST trust. |
-| TLS private key | service identity, `0400` | Least-readable private material. |
+| JWKS or HS256 trust file | consuming daemon identity, `0400` | Controllers/accounting use `slurm`; REST uses `slurmrestd`. Replacement changes REST trust. |
+| Slurm TLS certificate and private key | service identity, `0600` | The s2n plugin enforces private, service-owned TLS files; the private key is never image-baked. |
 | Controller state | `slurm:slurm`, `0700` | Contains authoritative scheduling state. |
 | Compute spool | `root:root`, `0755` with protected children | `slurmd` owns job launch state. |
 | Job callback capability | job UID, `0400`, private tmpfs | Not inherited in a job environment or image. |
@@ -204,8 +207,16 @@ override, printed at startup and rejected by the production profile.
 
 ## 8. Elastic compute-node lifecycle
 
-The initial implementation uses a bounded pool of dynamic `FUTURE` nodes and
-configless Slurm:
+Both profiles use configless Slurm and bound controller cardinality, but their
+node identity mechanisms deliberately differ:
+
+- rootless WSL uses dynamic-normal (`slurmd -Z --conf`) registration because
+  the container sees the VM topology rather than its Podman CPU quota;
+- a non-cloud production pool may use predeclared dynamic `FUTURE` nodes; and
+- the AWS power-save pool uses statically named `State=CLOUD` identities so a
+  resume request for `aws-cpuNNNN` can only register that exact node.
+
+Production `FUTURE` registration follows these controls:
 
 - `SelectType=select/cons_tres`
 - `MaxNodeCount` bounds the controller allocation.
@@ -220,13 +231,16 @@ configless Slurm:
 Scale-up is idempotent: allocate an identity, create its private spool,
 provision runtime trust, start the container, and wait for valid registration.
 
-Scale-down is deliberately conservative:
+Local scale-down is deliberately conservative:
 
 1. Mark the selected node `DRAIN` with an audit reason.
 2. Wait with bounded exponential backoff until no job is running or completing.
 3. Refuse removal if a reservation still refers to the node.
 4. Stop `slurmd` gracefully.
-5. Return the definition to `FUTURE` and remove only ephemeral state.
+5. Delete the dynamic-normal controller record and remove only that node's
+   private metadata/spool. A production FUTURE implementation instead returns
+   its predeclared identity to `FUTURE`; a CLOUD node follows Slurm power-save
+   state and the external reconciler.
 
 Automatic AWS elasticity uses `State=CLOUD`, `ResumeProgram`, and
 `SuspendProgram`, but those hooks call a narrow, authenticated lifecycle API.

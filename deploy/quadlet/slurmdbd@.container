@@ -1,0 +1,65 @@
+[Unit]
+Description=Slurm accounting daemon (%i)
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+Image=slurm-runtime.image
+ContainerName=slurmdbd-%i
+HostName=slurmdbd-%i
+Network=host
+Pull=never
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=all
+AddCapability=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID
+Environment=CONTAINER_ROLE=slurmdbd
+Environment=CLUSTER_DEPLOYMENT_PROFILE=production
+Environment=START_EMBEDDED_MUNGE=1
+Environment=SLURMDBD_CONFIG_TEMPLATE=/run/site/slurmdbd.conf.template
+Environment=MUNGE_KEY_FILE=/run/site/munge.key
+Environment=SLURMDBD_STORAGE_PASSWORD_FILE=/run/site/database-password
+Environment=SLURMDBD_STORAGE_TLS_CA_FILE=/run/site/database-ca.pem
+Environment=SLURM_JWKS_FILE=/run/site/slurm-jwks.json
+Environment=SLURM_TLS_CA_FILE=/run/site/cluster-ca.pem
+Environment=SLURM_TLS_CERT_FILE=/run/site/tls-cert.pem
+Environment=SLURM_TLS_KEY_FILE=/run/site/tls-key.pem
+EnvironmentFile=/etc/slurm-production/env/slurmdbd-%i.env
+# slurmdbd has a separate configuration grammar.  Mount a reviewed template;
+# the root supervisor replaces only the bounded database placeholders and
+# writes the result to private tmpfs before dropping to uid 64030.
+Volume=/etc/slurm-production/config/slurmdbd.conf.template:/run/site/slurmdbd.conf.template:ro,z,nodev,nosuid,noexec
+Volume=/etc/slurm-production/trust/slurm-jwks.json:/run/site/slurm-jwks.json:ro,z,nodev,nosuid,noexec
+Volume=/etc/slurm-production/trust/cluster-ca.pem:/run/site/cluster-ca.pem:ro,z,nodev,nosuid,noexec
+Volume=/etc/slurm-production/trust/database-ca.pem:/run/site/database-ca.pem:ro,z,nodev,nosuid,noexec
+Volume=/run/slurm-secrets/munge.key:/run/site/munge.key:ro,z,nodev,nosuid,noexec
+Volume=/run/slurm-secrets/slurmdbd-password:/run/site/database-password:ro,Z,nodev,nosuid,noexec
+Volume=/run/slurm-pki/slurmdbd-%i/cert.pem:/run/site/tls-cert.pem:ro,Z,nodev,nosuid,noexec
+Volume=/run/slurm-pki/slurmdbd-%i/key.pem:/run/site/tls-key.pem:ro,Z,nodev,nosuid,noexec
+Tmpfs=/run:rw,nodev,nosuid,noexec,size=128m,mode=0755
+Tmpfs=/tmp:rw,nodev,nosuid,noexec,size=64m,mode=1777
+Tmpfs=/var/log:rw,nodev,nosuid,noexec,size=256m,mode=0755
+PidsLimit=2048
+Memory=4G
+HealthCmd=/usr/local/sbin/cluster-healthcheck
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=4
+HealthStartPeriod=60s
+HealthOnFailure=kill
+Notify=healthy
+
+[Service]
+Restart=on-failure
+RestartSec=10s
+TimeoutStartSec=3min
+TimeoutStopSec=2min
+LimitNOFILE=131072
+UMask=0077
+ExecStartPre=/usr/bin/test -s /run/slurm-secrets/munge.key
+ExecStartPre=/usr/bin/test -s /run/slurm-secrets/slurmdbd-password
+ExecStartPre=/usr/bin/test -s /etc/slurm-production/trust/database-ca.pem
+ExecStartPre=/usr/bin/test -s /run/slurm-pki/slurmdbd-%i/key.pem
+
+[Install]
+WantedBy=multi-user.target

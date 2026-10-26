@@ -1,0 +1,41 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadOnlyTheClusterMungeSecret",
+      "Effect": "Allow",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:slurm/production-a/munge-*"
+    },
+    {
+      "Sid": "DecryptOnlyThroughSecretsManager",
+      "Effect": "Allow",
+      "Action": "kms:Decrypt",
+      "Resource": "arn:aws:kms:<REGION>:<ACCOUNT_ID>:key/<SECRETS_KMS_KEY_ID>",
+      "Condition": {
+        "StringEquals": {
+          "kms:ViaService": "secretsmanager.<REGION>.amazonaws.com"
+        },
+        "StringLike": {
+          "kms:EncryptionContext:SecretARN": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:slurm/production-a/munge-*"
+        }
+      }
+    },
+    {
+      "Sid": "AuthenticateToEcr",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "PullOnlyThePromotedSlurmRepository",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer"
+      ],
+      "Resource": "arn:aws:ecr:<REGION>:<ACCOUNT_ID>:repository/<SLURM_IMAGE_REPOSITORY>"
+    }
+  ]
+}

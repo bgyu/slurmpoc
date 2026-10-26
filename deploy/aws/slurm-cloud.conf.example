@@ -1,0 +1,38 @@
+# Render these records into the site's single, authoritative slurm.conf only
+# after the lifecycle API, private DNS, compute AMI, PKI and IAM policy have
+# passed staging acceptance.  The production container rejects Include
+# directives so that it can validate the complete policy before startup.
+# Enabling power save with a stub ResumeProgram can allocate jobs to hosts that
+# will never boot.
+
+# The client performs only an mTLS request to a narrow reconciler.  slurmctld
+# never receives EC2 credentials and never talks to the Podman socket.
+ResumeProgram=/usr/local/libexec/slurm/slurm-resume-program
+SuspendProgram=/usr/local/libexec/slurm/slurm-suspend-program
+
+# The API persists intent quickly; instance launch/termination is asynchronous.
+# ResumeTimeout must cover the measured p99 EC2 launch, boot, secret/PKI fetch,
+# image verification, shared-storage mount and slurmd registration time.
+ResumeTimeout=900
+SuspendTimeout=600
+SuspendTime=900
+
+# Rates are nodes per minute.  They bound AWS API pressure, quota consumption,
+# correlated image pulls and rapid changes in power/cost.
+ResumeRate=20
+SuspendRate=30
+
+# Preserve live exclusions across `scontrol reconfigure`.  A change-control
+# procedure can temporarily protect nodes/partitions during an incident.
+ReconfigFlags=KeepPowerSaveSettings
+SuspendExcStates=DOWN,DRAIN,FAIL,INVALID_REG,MAINTENANCE,RESERVED
+SchedulerParameters=sbatch_wait_nodes
+
+# This example reserves 900 identities.  Together with the 100 FUTURE nodes in
+# config/slurm.production.conf it exactly matches MaxNodeCount=1000.  Resource
+# values must be revalidated against the selected EC2 launch-template shape.
+# The base production configuration already gives the standard partition an
+# explicit `Nodes=compute[0001-0100]` membership, preventing these CLOUD
+# identities from silently joining both partitions.
+NodeName=aws-cpu[0001-0900] CPUs=4 Boards=1 SocketsPerBoard=1 CoresPerSocket=2 ThreadsPerCore=2 RealMemory=15000 Feature=aws,cpu-standard,m7i Weight=100 State=CLOUD
+PartitionName=cloud Nodes=aws-cpu[0001-0900] Default=NO DefaultTime=00:10:00 MaxTime=1-00:00:00 DefMemPerCPU=1024 MaxMemPerCPU=3750 State=UP

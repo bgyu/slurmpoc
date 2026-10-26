@@ -1,8 +1,9 @@
 # Production Slurm implementation plan
 
 This plan implements the approved design in independently testable layers.
-The repository is not currently a valid Git worktree, so the usual commit per
-layer cannot be performed here; each layer is nevertheless kept reviewable.
+Each completed layer is recorded as a focused Git commit so the build,
+security decisions, workflow service, and deployment examples can be reviewed
+or reverted independently.
 
 ## Layer 1: build and runtime contract
 
@@ -19,7 +20,8 @@ scan image configuration and history for generated secrets.
 ## Layer 2: Slurm configuration and elastic nodes
 
 - Add production and simulation configuration templates.
-- Enable configless operation and a bounded `FUTURE` node pool.
+- Enable configless operation, bounded dynamic-normal nodes in the rootless
+  simulation, and bounded `FUTURE`/`CLOUD` identities in production.
 - Add cgroup v2 production settings and an explicit WSL simulation override.
 - Implement lock-protected, idempotent add/drain/remove node commands.
 
@@ -54,7 +56,7 @@ broker around an ambiguous submission; verify one master and one array.
 - Add Quadlet/systemd examples and an AWS deployment contract.
 - Document secret-manager, PKI, IAM, networking, storage, backup, restore,
   upgrade, node lifecycle, and incident procedures.
-- Add a complete acceptance script and operator commands.
+- Add a complete local acceptance script and operator commands.
 
 Verification: lint configuration, render Compose/Quadlet definitions, run the
 acceptance suite, and document limitations not testable inside WSL.

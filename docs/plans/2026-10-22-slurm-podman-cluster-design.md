@@ -5,7 +5,9 @@
 Build Slurm and MUNGE RPMs from their latest source releases on UBI 10.2,
 retain the artifacts below `/var/packages`, install those artifacts into the
 same image, and use that image for a local Slurm simulation consisting of one
-controller, one database service, and five compute nodes.
+controller, one MariaDB service, one `slurmdbd` service, and five compute
+nodes. The protected REST and workflow services added by the production design
+use the same image.
 
 ## Architecture
 
@@ -16,13 +18,16 @@ runtime image under `/var/packages/RPMS` and `/var/packages/SRPMS`; `dnf`
 installs the binary artifacts and resolves their runtime dependencies.
 
 Every cluster service uses the resulting image. A role-aware entrypoint starts
-MUNGE followed by the appropriate daemon. The database role also initializes
-and runs MariaDB. It renders the password-bearing `slurmdbd.conf` at runtime,
-so credentials are not stored in source control or image layers.
+only the service selected for that container. MariaDB and `slurmdbd` are
+separate roles; the latter renders its password-bearing configuration into
+tmpfs at runtime, so credentials are not stored in source control or image
+layers.
 
-Compose declares five compute services explicitly to give Slurm stable node
-names. A helper creates one shared MUNGE key and a random database password.
-Named volumes preserve MariaDB and controller state.
+Compose declares five compute services explicitly. Each registers a stable
+container hostname as a dynamic-normal Slurm node with a deterministic
+simulation resource shape. A helper creates one shared MUNGE key, an HS256
+development key, and independent database/broker credentials. Named volumes
+preserve MariaDB, controller, workflow, shared-data and compute-spool state.
 
 ## Simulation constraints
 
