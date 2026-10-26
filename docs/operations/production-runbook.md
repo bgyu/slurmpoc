@@ -18,6 +18,10 @@ Slurm or retrieve upstream source archives.
 The release record must retain the Git commit, source pins, complete
 `BUILD-MANIFEST`, OCI digest, SBOM digest, scan-policy result, signature
 identity, acceptance result and any database/state compatibility decision.
+It must also retain the repository ID and NEVRA for every resolved build and
+runtime dependency according to
+`docs/operations/dependency-provenance.md`; RPM `Vendor` metadata alone is not
+proof of the repository used by DNF.
 
 ## 1. Initial deployment
 

@@ -117,6 +117,11 @@ directory, verifies each pinned SHA-256 before installation/import, and keeps
 CentOS Stream repository definitions command-scoped. GPG verification remains
 enabled for Stream BaseOS, AppStream and CRB.
 
+The complete repository-to-package mapping, direct SRPM BuildRequires,
+observed runtime transaction, plugin/library graph, subscription boundary and
+production provenance requirements are maintained in
+[dependency sources and package provenance](dependency-provenance.md).
+
 The current Stream `libbpf-devel` dependency requires a newer
 `kernel-headers` package than UBI 10.2 GA. That replacement occurs only in the
 disposable builder. Builder packages are never copied into the runtime image;
@@ -216,6 +221,10 @@ their signed transitive dependencies and the Slurm plugin libraries.
 self-contained Compose image. Production roles backed by an external HA
 database can use `--without-integration-database` when constructing a
 site-specific role image.
+
+The local package manifest does not inventory third-party dependency RPMs.
+Production CI must capture their exact repository IDs and NEVRAs plus the
+final image SBOM as described in the dependency provenance document.
 
 After DNF cleanup, the script requires all five daemon executables and checks
 the following plugin libraries with `ldd` for unresolved dependencies:
