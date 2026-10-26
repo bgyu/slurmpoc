@@ -131,12 +131,21 @@ podman build --format docker \
 ## Job submission
 
 A conventional batch script can be streamed into the controller without
-mounting the source checkout into a container:
+mounting the source checkout into a container. Run the submission process as
+the ordinary local workflow account so the resulting application is not UID
+0:
 
 ```bash
-scripts/submit-job.sh examples/hostname.sbatch --wait
+podman exec --user workflow -i controller \
+  sbatch --chdir=/shared/jobs --wait < examples/hostname.sbatch
 podman exec controller ls -l /shared/output
 ```
+
+`scripts/submit-job.sh` currently uses the container's default exec user and
+is retained only as a documented local gap until its root-submission behavior
+and negative regression test are corrected together. Production users never
+submit through Podman. See
+[service identities, job users, ownership, and permissions](docs/operations/identity-and-permissions.md#81-known-local-submit-jobsh-gap).
 
 The local cluster uses the `shared-data` named volume at `/shared`. It is not a
 host bind mount; inspect files through a cluster container. Fixed and
@@ -238,6 +247,7 @@ Read these before adapting the examples:
 - [architecture and threat model](docs/plans/2026-10-23-production-slurm-design.md)
 - [package build and runtime implementation](docs/operations/build-and-runtime.md)
 - [dependency sources and package provenance](docs/operations/dependency-provenance.md)
+- [service identities, job users, ownership, and permissions](docs/operations/identity-and-permissions.md)
 - [implementation rationale](docs/plans/2026-10-23-production-implementation-plan.md)
 - [AWS deployment contract](docs/operations/aws-deployment.md)
 - [production operations runbook](docs/operations/production-runbook.md)

@@ -32,6 +32,8 @@ proof of the repository used by DNF.
    capability delivery through reviewed IaC.
 3. Create centralized POSIX users/groups and confirm numeric identity parity on
    every role.  Never create production users opportunistically in a container.
+   Apply and audit the service-user, job-user and file-mode contract in
+   [service identities, job users, ownership, and permissions](identity-and-permissions.md).
 4. Render one complete, root-owned `slurm.conf` under
    `/etc/slurm-production/config`; runtime `Include` directives are rejected.
    Preserve the base standard partition's explicit FUTURE-node membership

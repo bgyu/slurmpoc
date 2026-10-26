@@ -271,6 +271,9 @@ the package-defined `mysql` identity to be UID/GID 27.
 These in-image IDs are part of the container contract, not a replacement for
 production directory identity. Production hosts and centralized identity
 must present matching job-user numbers across controller and compute nodes.
+The complete daemon/job privilege model, file ownership rationale, official
+source references, audit commands and current local submission gap are in
+[service identities, job users, ownership, and permissions](identity-and-permissions.md).
 
 ### 6.2 Directory ownership and modes
 

@@ -137,6 +137,9 @@ Central identity (normally SSSD/LDAP) must return identical numeric UID/GID
 values on controller and compute hosts and inside the compute container.
 Deployment acceptance must prove `getent passwd <test-user>` and a submitted
 job's real/effective IDs before admitting users.
+The complete service/job identity model, ownership matrix, verification
+commands and upstream references are in
+[service identities, job users, ownership, and permissions](identity-and-permissions.md).
 
 ## 5. PKI separation and rotation
 
