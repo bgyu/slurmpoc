@@ -58,7 +58,35 @@ that directory only when deliberately rotating the local cluster identity.
 
 ## RPM build and image contents
 
-Build directly with:
+Package construction, runtime installation, and filesystem configuration are
+separate commands. On a disposable UBI/RHEL-compatible EL10 build host:
+
+```bash
+sudo scripts/build-rpms.sh \
+  --output-dir /var/packages \
+  --work-dir /var/tmp/slurm-rpm-build
+```
+
+On the target EL10 runtime host or image filesystem:
+
+```bash
+sudo scripts/install-runtime.sh \
+  --packages-dir /var/packages \
+  --with-integration-database
+sudo scripts/configure-runtime.sh \
+  --source-root "$PWD" \
+  --with-integration-database
+```
+
+Production roles using an external database may pass
+`--without-integration-database` to the last two commands. The configuration
+command installs identities and immutable assets but never creates secrets.
+Pinned defaults live in `build/versions.conf`; use `--help` for explicit
+version/digest overrides and alternate paths. These commands intentionally
+refuse Fedora or another non-EL10 host, so from Fedora WSL run them inside UBI
+10.2 or use the multi-stage build below.
+
+The Dockerfile is a thin caller of those same three scripts:
 
 ```bash
 podman build --format docker \
@@ -66,7 +94,7 @@ podman build --format docker \
   --file Dockerfile .
 ```
 
-The builder verifies source archives before extraction, builds MUNGE first,
+`build-rpms.sh` verifies source archives before extraction, builds MUNGE first,
 then builds Slurm with REST/JWT, MySQL accounting, YAML, `tls/s2n`, cgroup v2,
 and namespace plugins. The final image contains:
 
@@ -224,7 +252,7 @@ Run unit and integration checks after changes:
 ```bash
 python3 -m unittest discover -s workflow/tests -v
 python3 -m unittest discover -s scripts/tests -v
-bash -n scripts/*.sh scripts/nodes/*.sh \
+bash -n scripts/*.sh scripts/lib/*.sh scripts/nodes/*.sh \
   deploy/lifecycle/lifecycle-common.sh \
   deploy/lifecycle/slurm-resume-program \
   deploy/lifecycle/slurm-suspend-program \

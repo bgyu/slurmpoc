@@ -126,7 +126,7 @@ the separation between configuration and secrets. Acceptance requires:
 - a full UBI 10.2 image build;
 - verified RPM/SRPM artifacts under `/var/packages`;
 - installed Slurm/MUNGE versions and plugins;
-- the existing 46 unit/contract tests;
+- all unit and deployment-contract tests;
 - scheduler and accounting smoke tests;
 - the REST master/worker workflow; and
 - dynamic node add, placement, drain, and removal.

@@ -49,7 +49,7 @@ fi
 printf '1/8 static validation\n'
 python3 -m unittest discover -s workflow/tests -v
 python3 -m unittest discover -s scripts/tests -v
-bash -n scripts/*.sh scripts/nodes/*.sh \
+bash -n scripts/*.sh scripts/lib/*.sh scripts/nodes/*.sh \
     deploy/lifecycle/lifecycle-common.sh \
     deploy/lifecycle/slurm-resume-program \
     deploy/lifecycle/slurm-suspend-program \
@@ -64,7 +64,8 @@ podman run --rm --entrypoint /bin/bash "$image" -c '
     set -Eeuo pipefail
     test "$(find /var/packages/RPMS -type f -name "*.rpm" | wc -l)" -ge 7
     test "$(find /var/packages/SRPMS -type f -name "*.rpm" | wc -l)" -ge 2
-    tail -n +5 /var/packages/BUILD-MANIFEST | sha256sum --check --strict
+    cd /var/packages
+    tail -n +5 BUILD-MANIFEST | sha256sum --check --strict
     test ! -e /run/site/munge.key
     test ! -e /run/site/database-password
     test ! -e /run/workflow/api.token
